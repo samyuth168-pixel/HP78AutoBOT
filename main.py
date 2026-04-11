@@ -29,11 +29,6 @@ user_state = {}  # simple memory per user
 # MANUS AI FUNCTION
 # =========================
 def enhance_with_manus(image_bytes: bytes, style: bool = False):
-    """
-    Send image to Manus AI for enhancement.
-    Replace endpoint if your Manus docs differ.
-    """
-
     headers = {
         "Authorization": f"Bearer {MANUS_API_KEY}",
     }
@@ -47,11 +42,45 @@ def enhance_with_manus(image_bytes: bytes, style: bool = False):
     }
 
     try:
-        res = requests.post(MANUS_API_URL, headers=headers, files=files, data=data)
+        res = requests.post(MANUS_API_URL, headers=headers, files=files, data=data, timeout=60)
+
+        print("MANUS STATUS:", res.status_code)
+        print("MANUS RESPONSE:", res.text[:500])  # DEBUG
+
         res.raise_for_status()
 
-        # assume API returns image bytes
-        return res.content
+        # =========================
+        # CASE 1: direct image
+        # =========================
+        if "image" in res.headers.get("Content-Type", ""):
+            return res.content
+
+        # =========================
+        # CASE 2: JSON response
+        # =========================
+        try:
+            data = res.json()
+
+            # common patterns
+            if "result_url" in data:
+                img_url = data["result_url"]
+                img_res = requests.get(img_url)
+                return img_res.content
+
+            if "output" in data:
+                img_url = data["output"]
+                img_res = requests.get(img_url)
+                return img_res.content
+
+            if "data" in data and "image" in data["data"]:
+                img_url = data["data"]["image"]
+                img_res = requests.get(img_url)
+                return img_res.content
+
+        except Exception as e:
+            print("JSON parse error:", e)
+
+        return None
 
     except Exception as e:
         print("Manus API error:", e)
