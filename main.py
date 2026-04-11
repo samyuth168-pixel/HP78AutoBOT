@@ -154,29 +154,24 @@ async def worker(app):
 
 # -------- MAIN --------
 
-async def main():
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button))
 
-    # start worker after app starts
-    async def on_start(app):
+    # Start background worker AFTER bot starts (safe way)
+    async def post_init(app):
         app.create_task(worker(app))
 
-    app.post_init = on_start
+    app.post_init = post_init
 
     print("Pro Bot Running...")
-    await app.run_polling()
+
+    # IMPORTANT: DO NOT use asyncio.run here
+    app.run_polling()
+
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
-
-# =============================
-# requirements.txt
-# =============================
-# python-telegram-bot==20.7
-# pillow
-# opencv-python
+    main()
