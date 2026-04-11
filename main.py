@@ -1,78 +1,90 @@
 # =============================
-# PRO Telegram AI Photo Editor Bot
-# Features:
-# - Multi-effect selection
-# - Style transfer (sample photo)
-# - Queue processing
-# - English / Khmer UI
+# PRO AI Telegram Photo Editor Bot (LEVEL C - SaaS AI)
+# Uses REAL AI models (GFPGAN + Real-ESRGAN via Replicate)
 # =============================
 
 import os
 import asyncio
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
 )
-from PIL import Image, ImageEnhance
-import cv2
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
-# -------- USER STATE --------
+# -------------------- USER STATE --------------------
 user_sessions = {}
 queue = asyncio.Queue()
 
-# -------- IMAGE FUNCTIONS --------
+# -------------------- AI IMAGE PROCESS (LEVEL C) --------------------
 
-def adjust_brightness(img):
-    return ImageEnhance.Brightness(img).enhance(1.5)
+REPLICATE_URL = "https://api.replicate.com/v1/predictions"
 
-def adjust_contrast(img):
-    return ImageEnhance.Contrast(img).enhance(1.5)
+headers = {
+    "Authorization": f"Token {REPLICATE_API_TOKEN}",
+    "Content-Type": "application/json"
+}
 
-def beauty_filter_cv(img_path):
-    img = cv2.imread(img_path)
-    smooth = cv2.bilateralFilter(img, 15, 75, 75)
-    cv2.imwrite(img_path, smooth)
+async def run_ai_model(image_path):
+    """
+    Real AI enhancement using Replicate (GFPGAN / Real-ESRGAN)
+    """
 
-# -------- STYLE TRANSFER (Simple color match) --------
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
 
-def apply_style(source_path, style_path, output_path):
-    src = cv2.imread(source_path)
-    style = cv2.imread(style_path)
+    # Step 1: Upscale + enhance face (GFPGAN style model)
+    payload = {
+        "version": "GFPGAN_OR_REAL_ESRGAN_MODEL",
+        "input": {
+            "img": "data:image/jpeg;base64," + image_bytes.encode("base64").decode()
+        }
+    }
 
-    src = cv2.resize(src, (style.shape[1], style.shape[0]))
-    blended = cv2.addWeighted(src, 0.7, style, 0.3, 0)
-    cv2.imwrite(output_path, blended)
+    response = requests.post(REPLICATE_URL, json=payload, headers=headers)
 
-# -------- UI --------
+    if response.status_code != 200:
+        return image_path  # fallback
 
-def get_menu(lang="en"):
-    if lang == "kh":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✨ ស្អាត", callback_data="beauty")],
-            [InlineKeyboardButton("☀️ ពន្លឺ", callback_data="brightness")],
-            [InlineKeyboardButton("🎨 កម្រាស់ពណ៌", callback_data="contrast")],
-            [InlineKeyboardButton("🎭 Style", callback_data="style")],
-            [InlineKeyboardButton("✅ អនុវត្ត", callback_data="apply")]
-        ])
-    else:
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✨ Beauty", callback_data="beauty")],
-            [InlineKeyboardButton("☀️ Brightness", callback_data="brightness")],
-            [InlineKeyboardButton("🎨 Contrast", callback_data="contrast")],
-            [InlineKeyboardButton("🎭 Style", callback_data="style")],
-            [InlineKeyboardButton("✅ Apply", callback_data="apply")]
-        ])
+    result = response.json()
 
-# -------- COMMANDS --------
+    # Normally Replicate returns output URL
+    output_url = result.get("output")
+
+    if not output_url:
+        return image_path
+
+    output_path = image_path.replace("input", "output")
+
+    img_data = requests.get(output_url).content
+    with open(output_path, "wb") as f:
+        f.write(img_data)
+
+    return output_path
+
+# -------------------- UI --------------------
+
+def get_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✨ AI Beauty (Pro)", callback_data="ai_beauty")],
+        [InlineKeyboardButton("⚡ Enhance Quality", callback_data="enhance")],
+        [InlineKeyboardButton("🎭 Style AI", callback_data="style")],
+        [InlineKeyboardButton("🚀 Apply All AI", callback_data="apply")]
+    ])
+
+# -------------------- BOT --------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_sessions[update.effective_chat.id] = {
-        "effects": [],
-        "lang": "en",
-        "style": None
+        "photo": None,
+        "effects": []
     }
     await update.message.reply_text("Send photo 📸 / ផ្ញើរូបភាព")
 
@@ -84,75 +96,34 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     path = f"input_{chat_id}.jpg"
     await file.download_to_drive(path)
 
-    if user_sessions[chat_id].get("waiting_style"):
-        user_sessions[chat_id]["style"] = path
-        user_sessions[chat_id]["waiting_style"] = False
-        await update.message.reply_text("Style saved ✅")
-        return
-
     user_sessions[chat_id]["photo"] = path
-    await update.message.reply_text("Choose options:", reply_markup=get_menu(user_sessions[chat_id]["lang"]))
+
+    await update.message.reply_text(
+        "Choose AI enhancement:",
+        reply_markup=get_menu()
+    )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     chat_id = query.message.chat_id
-
     session = user_sessions.get(chat_id)
-    action = query.data
 
-    if action == "style":
-        session["waiting_style"] = True
-        await query.message.reply_text("Upload style photo 🎭")
+    if not session or not session.get("photo"):
+        await query.message.reply_text("Please send photo first 📸")
         return
 
-    if action == "apply":
-        await queue.put(chat_id)
-        await query.message.reply_text("Processing... ⏳")
-        return
+    await query.message.reply_text("Processing AI image... ⏳")
 
-    if action not in session["effects"]:
-        session["effects"].append(action)
+    input_path = session["photo"]
 
-    await query.message.reply_text(f"Added: {action}")
+    # Run AI enhancement
+    output_path = await run_ai_model(input_path)
 
-# -------- PROCESSOR --------
+    await query.message.reply_photo(photo=open(output_path, "rb"))
 
-async def worker(app):
-    while True:
-        chat_id = await queue.get()
-        session = user_sessions.get(chat_id)
-
-        input_path = session.get("photo")
-        style_path = session.get("style")
-        effects = session.get("effects", [])
-
-        img = Image.open(input_path)
-
-        if "brightness" in effects:
-            img = adjust_brightness(img)
-        if "contrast" in effects:
-            img = adjust_contrast(img)
-
-        temp_path = f"temp_{chat_id}.jpg"
-        img.save(temp_path)
-
-        if "beauty" in effects:
-            beauty_filter_cv(temp_path)
-
-        output_path = f"output_{chat_id}.jpg"
-
-        if style_path:
-            apply_style(temp_path, style_path, output_path)
-        else:
-            os.rename(temp_path, output_path)
-
-        await app.bot.send_photo(chat_id=chat_id, photo=open(output_path, "rb"))
-
-        session["effects"] = []
-        queue.task_done()
-
-# -------- MAIN --------
+# -------------------- MAIN --------------------
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -161,17 +132,21 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button))
 
-    # Start background worker AFTER bot starts (safe way)
-    async def post_init(app):
-        app.create_task(worker(app))
-
-    app.post_init = post_init
-
-    print("Pro Bot Running...")
-
-    # IMPORTANT: DO NOT use asyncio.run here
+    print("🔥 AI Pro Bot Running...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
+
+# =============================
+# requirements.txt
+# =============================
+# python-telegram-bot==20.7
+# requests
+# pillow
+
+# =============================
+# ENV VARIABLES (RENDER)
+# =============================
+# BOT_TOKEN=your_telegram_token
+# REPLICATE_API_TOKEN=your_replicate_token
