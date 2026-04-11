@@ -40,31 +40,51 @@ menu_kb = ReplyKeyboardMarkup(
 # ======================
 # START
 # ======================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_state[user_id] = STATE_MENU
-
-    await update.message.reply_text(
-        "👋 Welcome to BeautyAgent AI ✨\nChoose enhancement type:",
-        reply_markup=menu_kb
-    )
-
-# ======================
-# MAIN MESSAGE HANDLER
-# ======================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
-    state = user_state.get(user_id, STATE_MENU)
+    text = update.message.text if update.message else None
+    photo = update.message.photo if update.message else None
 
-    # ----------------------
-    # MENU SELECT
-    # ----------------------
+    if user_id not in user_state:
+        user_state[user_id] = STATE_MENU
+
+    state = user_state[user_id]
+
+    # MENU
     if text == "🖼 Sample Enhance":
         user_state[user_id] = STATE_WAIT_STYLE
-        await update.message.reply_text(
-            "📤 Send 1 STYLE photo (this will be used to copy style)"
-        )
+        await update.message.reply_text("📤 Send 1 STYLE photo")
+        return
+
+    if text == "✨ New Enhance":
+        user_state[user_id] = STATE_WAIT_TARGET
+        user_style[user_id] = None
+        await update.message.reply_text("📤 Send photo(s) to enhance")
+        return
+
+    # STYLE PHOTO
+    if state == STATE_WAIT_STYLE:
+        if photo:
+            user_style[user_id] = photo[-1].file_id
+            user_state[user_id] = STATE_WAIT_TARGET
+            await update.message.reply_text("✅ Style saved! Now send target photos.")
+        else:
+            await update.message.reply_text("❌ Send a photo only.")
+        return
+
+    # TARGET PHOTO
+    if state == STATE_WAIT_TARGET:
+        if photo:
+            await update.message.reply_text("🎨 Processing with AI...")
+
+            result = await manus_enhance(photo[-1].file_id, user_style.get(user_id))
+
+            if result:
+                await update.message.reply_photo(result)
+            else:
+                await update.message.reply_text("❌ AI failed.")
+        else:
+            await update.message.reply_text("❌ Send a photo.")
         return
 
     if text == "✨ New Enhance":
