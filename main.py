@@ -1,88 +1,244 @@
-import logging
+# Telegram Photo Enhance Bot (Render Ready)
+# python-telegram-bot==20.7
+
 import os
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-
-TOKEN = os.getenv("BOT_TOKEN")
-
-logging.basicConfig(level=logging.INFO)
-
-user_state = {}
-
-# MENU
-menu = ReplyKeyboardMarkup(
-    [["Send photo 📸"]],
-    resize_keyboard=True
+from io import BytesIO
+from PIL import Image
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters
 )
 
-# START
+# =====================
+# CONFIG
+# =====================
+TOKEN = os.getenv("BOT_TOKEN")
+
+# user sessions (simple in-memory)
+user_data = {}
+
+# structure:
+# user_data[user_id] = {
+#   "mode": "sample" | "new",
+#   "style_img": np.array,
+#   "target_imgs": [np.array]
+# }
+
+# =====================
+# IMAGE UTILITIES
+# =====================
+
+def read_image(file_bytes):
+    img = Image.open(BytesIO(file_bytes)).convert("RGB")
+    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+
+def to_bytes(img):
+    _, buffer = cv2.imencode('.jpg', img)
+    return BytesIO(buffer.tobytes())
+
+
+# SIMPLE STYLE EXTRACTION
+# =====================
+def extract_style(img):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    return {
+        "brightness": float(np.mean(hsv[:, :, 2])),
+        "contrast": float(np.std(hsv[:, :, 2]))
+    }
+
+
+def apply_style(img, style):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # brightness shift
+    v = hsv[:, :, 2].astype(np.float32)
+    v = v + (style["brightness"] - np.mean(v))
+    v = np.clip(v, 0, 255)
+    hsv[:, :, 2] = v.astype(np.uint8)
+
+    out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+    # contrast boost
+    alpha = max(0.8, min(1.5, style["contrast"] / 50))
+    out = cv2.convertScaleAbs(out, alpha=alpha)
+
+    return out
+
+
+# NEW ENHANCE
+# =====================
+
+def enhance_hd(img):
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5, -1],
+                       [0, -1, 0]])
+    return cv2.filter2D(img, -1, kernel)
+
+
+def enhance_brightness(img):
+    return cv2.convertScaleAbs(img, alpha=1.2, beta=20)
+
+
+# =====================
+# UI
+# =====================
+
+def main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Sample Enhance", callback_data="sample")],
+        [InlineKeyboardButton("🤖 New Enhance", callback_data="new")]
+    ])
+
+
+def new_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔆 Brightness", callback_data="bright")],
+        [InlineKeyboardButton("📷 HD Enhance", callback_data="hd")],
+        [InlineKeyboardButton("⚡ Auto Enhance", callback_data="auto")]
+    ])
+
+
+# =====================
+# HANDLERS
+# =====================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Welcome to BeautyAgent ✨\nSend photo to enhance",
-        reply_markup=menu
+        "Send me a photo to start enhancement ✨"
     )
 
-# SIMPLE AI ENHANCEMENT (REAL PROCESSING)
-def enhance_image(input_path, output_path):
-    img = cv2.imread(input_path)
 
-    # upscale
-    img = cv2.resize(img, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-
-    # denoise
-    img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
-
-    # convert to PIL for color boost
-    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-
-    enhancer = ImageEnhance.Sharpness(pil_img)
-    pil_img = enhancer.enhance(2.0)
-
-    enhancer = ImageEnhance.Contrast(pil_img)
-    pil_img = enhancer.enhance(1.3)
-
-    pil_img.save(output_path)
-
-# PHOTO HANDLER
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Processing AI image... ⏳")
+    user_id = update.message.from_user.id
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    file_bytes = await file.download_as_bytearray()
+    img = read_image(file_bytes)
+
+    user_data.setdefault(user_id, {})
+
+    # first image → ask mode
+    user_data[user_id]["temp_img"] = img
+
+    await update.message.reply_text(
+        "Choose enhancement type:",
+        reply_markup=main_menu()
+    )
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    data = query.data
+
+    if user_id not in user_data:
+        user_data[user_id] = {}
+
+    # =====================
+    # SAMPLE ENHANCE
+    # =====================
+    if data == "sample":
+        user_data[user_id]["mode"] = "sample"
+        user_data[user_id]["step"] = "style"
+        user_data[user_id]["target_imgs"] = []
+
+        await query.message.reply_text("Send 1 STYLE photo 🎨")
+
+    # =====================
+    # NEW ENHANCE
+    # =====================
+    elif data == "new":
+        user_data[user_id]["mode"] = "new"
+        await query.message.reply_text(
+            "Choose tool:",
+            reply_markup=new_menu()
+        )
+
+    # NEW ENHANCE OPTIONS
+    elif data in ["bright", "hd", "auto"]:
+        user_data[user_id]["enhance_type"] = data
+        await query.message.reply_text("Now send your photo 📸")
+
+
+# =====================
+# SECOND PHOTO FLOW
+# =====================
+
+async def handle_second_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    if user_id not in user_data:
+        return
 
     photo = update.message.photo[-1]
     file = await context.bot.get_file(photo.file_id)
+    file_bytes = await file.download_as_bytearray()
+    img = read_image(file_bytes)
 
-    input_path = "input.jpg"
-    output_path = "output.jpg"
+    session = user_data[user_id]
 
-    await file.download_to_drive(input_path)
+    # =====================
+    # SAMPLE ENHANCE FLOW
+    # =====================
+    if session.get("mode") == "sample":
 
-    try:
-        enhance_image(input_path, output_path)
+        if session.get("step") == "style":
+            session["style_img"] = img
+            session["style"] = extract_style(img)
+            session["step"] = "target"
 
-        await update.message.reply_photo(
-            photo=open(output_path, "rb"),
-            caption="✨ AI Enhanced Image"
-        )
+            await update.message.reply_text("Now send target photos 📸")
+            return
 
-    except Exception as e:
-        await update.message.reply_text(f"Error: {str(e)}")
+        if session.get("step") == "target":
+            style = session.get("style")
+            result = apply_style(img, style)
 
-# TEXT HANDLER
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Please send a photo 📸")
+            bio = to_bytes(result)
+            bio.seek(0)
 
-# MAIN
+            await update.message.reply_photo(photo=bio)
+            return
+
+    # =====================
+    # NEW ENHANCE FLOW
+    # =====================
+    elif session.get("mode") == "new":
+        etype = session.get("enhance_type")
+
+        if etype == "bright":
+            result = enhance_brightness(img)
+        elif etype == "hd":
+            result = enhance_hd(img)
+        else:
+            result = cv2.convertScaleAbs(img, alpha=1.1, beta=10)
+
+        bio = to_bytes(result)
+        bio.seek(0)
+
+        await update.message.reply_photo(photo=bio)
+
+
+# =====================
+# APP START
+# =====================
+
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT, text_handler))
 
-    print("Bot running...")
-    app.run_polling(drop_pending_updates=True)
+    print("Bot is running...")
+    app.run_polling()
+
 
 if __name__ == "__main__":
     main()
