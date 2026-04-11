@@ -44,24 +44,33 @@ async def run_ai_model(image_path):
     try:
         image_url = upload_image(image_path)
 
+        headers = {
+            "Authorization": f"Token {REPLICATE_API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
         payload = {
-            # REAL MODEL (GFPGAN example - you can replace later)
-            "version": "928b2a2d7c0b4a4c9c5c7a5b6f0f0a1b2c3d4e5f6",
+            "version": "tencentarc/gfpgan",
             "input": {
-                "img": image_url
+                "img": image_url,
+                "version": "1.4",
+                "scale": 2
             }
         }
 
-        r = requests.post(REPLICATE_URL, json=payload, headers=headers)
+        r = requests.post(
+            "https://api.replicate.com/v1/predictions",
+            json=payload,
+            headers=headers
+        )
 
         if r.status_code != 201:
-            print("Replicate error:", r.text)
+            print("AI ERROR:", r.text)
             return image_path
 
         prediction = r.json()
         get_url = prediction["urls"]["get"]
 
-        # wait for result
         for _ in range(30):
             res = requests.get(get_url, headers=headers).json()
 
@@ -70,11 +79,11 @@ async def run_ai_model(image_path):
                 if isinstance(output, list):
                     output = output[0]
 
-                img_data = requests.get(output).content
-                out_path = image_path.replace("input", "output")
+                img = requests.get(output).content
 
+                out_path = image_path.replace("input", "output")
                 with open(out_path, "wb") as f:
-                    f.write(img_data)
+                    f.write(img)
 
                 return out_path
 
@@ -89,7 +98,7 @@ async def run_ai_model(image_path):
     except Exception as e:
         print("AI ERROR:", e)
         return image_path
-
+        
 # =============================
 # TELEGRAM BOT UI
 # =============================
