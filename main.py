@@ -1,148 +1,162 @@
-import os
 import logging
-from collections import defaultdict
-
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
 )
 
-# ---------------- LOGGING ----------------
+# =====================
+# LOGGING
+# =====================
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = os.getenv("BOT_TOKEN")
+# =====================
+# USER STATES MEMORY
+# =====================
+user_state = {}
+user_style_photo = {}
 
-# ---------------- STATE STORAGE ----------------
-USER_STATE = defaultdict(lambda: "MENU")
-USER_DATA = {}
+# STATES
+CHOOSING_MODE = "CHOOSING_MODE"
+WAIT_STYLE = "WAIT_STYLE"
+WAIT_TARGET = "WAIT_TARGET"
+NEW_ENHANCE_CHOOSE = "NEW_ENHANCE_CHOOSE"
+WAIT_NEW_PHOTO = "WAIT_NEW_PHOTO"
 
-# ---------------- KEYBOARDS ----------------
+# =====================
+# MENU
+# =====================
 main_menu = ReplyKeyboardMarkup(
     [["🖼 Sample Enhance", "✨ New Enhance"]],
     resize_keyboard=True
 )
 
 enhance_menu = ReplyKeyboardMarkup(
-    [["⚡ Brightness", "📸 HD Quality"], ["🎯 Auto Enhance"], ["🔙 Back"]],
+    [["Brightness", "HD", "Smooth", "AI Enhance"]],
     resize_keyboard=True
 )
 
-# ---------------- START ----------------
+# =====================
+# START
+# =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    USER_STATE[uid] = "MENU"
+    user_state[uid] = CHOOSING_MODE
 
     await update.message.reply_text(
-        "👋 Welcome!\nChoose enhancement type:",
+        "Welcome ✨\nChoose enhancement type:",
         reply_markup=main_menu
     )
 
-# ---------------- TEXT HANDLER ----------------
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =====================
+# HANDLE TEXT
+# =====================
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
-    state = USER_STATE[uid]
 
-    # BACK BUTTON
-    if text == "🔙 Back":
-        USER_STATE[uid] = "MENU"
-        await update.message.reply_text("Back to menu:", reply_markup=main_menu)
-        return
+    state = user_state.get(uid, CHOOSING_MODE)
 
-    # ---------------- MAIN MENU ----------------
-    if state == "MENU":
-
-        if text == "🖼 Sample Enhance":
-            USER_STATE[uid] = "WAIT_STYLE"
-            await update.message.reply_text(
-                "📤 Send 1 STYLE photo (this will be copied to others)"
-            )
-            return
-
-        if text == "✨ New Enhance":
-            USER_STATE[uid] = "NEW_MENU"
-            await update.message.reply_text(
-                "Choose enhancement tool:",
-                reply_markup=enhance_menu
-            )
-            return
-
-    # ---------------- NEW ENHANCE MENU ----------------
-    if state == "NEW_MENU":
-        USER_DATA[uid] = {"tool": text}
-        USER_STATE[uid] = "WAIT_NEW_PHOTO"
-
+    # =====================
+    # MAIN MENU
+    # =====================
+    if text == "🖼 Sample Enhance":
+        user_state[uid] = WAIT_STYLE
         await update.message.reply_text(
-            f"✅ Selected: {text}\nNow send your photo 📸"
+            "📤 Send 1 STYLE photo first (this will be copied to other photos)"
         )
         return
 
-    await update.message.reply_text("⚠️ Please use buttons only.")
+    if text == "✨ New Enhance":
+        user_state[uid] = NEW_ENHANCE_CHOOSE
+        await update.message.reply_text(
+            "Choose enhancement type:",
+            reply_markup=enhance_menu
+        )
+        return
 
-# ---------------- PHOTO HANDLER ----------------
-async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # =====================
+    # NEW ENHANCE CHOICE
+    # =====================
+    if state == NEW_ENHANCE_CHOOSE:
+        user_state[uid] = WAIT_NEW_PHOTO
+        user_state[f"{uid}_enhance_type"] = text
+
+        await update.message.reply_text(
+            f"Selected: {text}\nNow send your photo 📸"
+        )
+        return
+
+    # =====================
+    # BLOCK RANDOM TEXT
+    # =====================
+    await update.message.reply_text(
+        "Please use menu buttons only.",
+        reply_markup=main_menu
+    )
+
+# =====================
+# HANDLE PHOTO
+# =====================
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    state = USER_STATE[uid]
-    photo = update.message.photo[-1].file_id
+    state = user_state.get(uid, CHOOSING_MODE)
 
-    # ---------------- SAMPLE STYLE ----------------
-    if state == "WAIT_STYLE":
-        USER_DATA[uid] = {"style": photo}
-        USER_STATE[uid] = "WAIT_TARGET_SAMPLE"
+    photo_file = update.message.photo[-1].file_id
+
+    # =====================
+    # SAMPLE STYLE PHOTO
+    # =====================
+    if state == WAIT_STYLE:
+        user_style_photo[uid] = photo_file
+        user_state[uid] = WAIT_TARGET
 
         await update.message.reply_text(
-            "✅ Style saved!\nNow send target photo(s)."
+            "✅ Style saved!\nNow send target photo(s) to apply this style."
         )
         return
 
-    # ---------------- SAMPLE TARGET ----------------
-    if state == "WAIT_TARGET_SAMPLE":
-        style = USER_DATA[uid].get("style")
+    # =====================
+    # APPLY SAMPLE STYLE
+    # =====================
+    if state == WAIT_TARGET:
+        await update.message.reply_text("🎨 Processing sample enhance...")
 
-        await update.message.reply_text("🎨 Applying sample enhance...")
-
-        # 🔥 HERE YOU CAN CALL AI (Nano Banana / Manus / API)
-        # result = ai_style_transfer(style, photo)
-
-        await update.message.reply_text("✅ Done! (Sample enhanced image)")
+        # HERE YOU WILL CALL AI API (Nano Banana / Manus AI / etc)
+        await update.message.reply_text("✅ Done! (Sample enhanced photo returned)")
         return
 
-    # ---------------- NEW ENHANCE ----------------
-    if state == "WAIT_NEW_PHOTO":
-        tool = USER_DATA[uid].get("tool", "Auto Enhance")
+    # =====================
+    # NEW ENHANCE MODE
+    # =====================
+    if state == WAIT_NEW_PHOTO:
+        enhance_type = user_state.get(f"{uid}_enhance_type", "AI Enhance")
 
-        await update.message.reply_text(f"⚡ Applying {tool}...")
+        await update.message.reply_text(f"🎨 Processing {enhance_type}...")
 
-        # 🔥 HERE YOU CAN CALL AI / EDIT ENGINE
-        # result = enhance(photo, tool)
-
-        await update.message.reply_text("✅ Done! Enhanced image")
+        # PLACEHOLDER AI PROCESS
+        await update.message.reply_text("✅ Done! (Enhanced photo returned)")
         return
 
-    await update.message.reply_text("⚠️ Please choose enhance type first.")
+    await update.message.reply_text(
+        "Please choose enhancement type first.",
+        reply_markup=main_menu
+    )
 
-# ---------------- ERROR HANDLER ----------------
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logging.error("Error: %s", context.error)
-
-# ---------------- MAIN ----------------
+# =====================
+# MAIN APP
+# =====================
 def main():
-    app = Application.builder().token(TOKEN).build()
-
-    # 🚨 IMPORTANT FIX: avoid Telegram conflict
-    app.bot.delete_webhook(drop_pending_updates=True)
+    app = ApplicationBuilder().token("YOUR_BOT_TOKEN_HERE").build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    app.add_error_handler(error_handler)
-
-    print("🤖 Bot running...")
+    print("Bot running...")
     app.run_polling()
 
 if __name__ == "__main__":
