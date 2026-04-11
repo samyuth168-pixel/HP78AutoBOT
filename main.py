@@ -154,20 +154,25 @@ async def worker(app):
 
 # -------- MAIN --------
 
-def main():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button))
 
-    app.create_task(worker(app))
+    # start worker after app starts
+    async def on_start(app):
+        app.create_task(worker(app))
+
+    app.post_init = on_start
 
     print("Pro Bot Running...")
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
 
 # =============================
 # requirements.txt
