@@ -1,177 +1,88 @@
-# =============================
-# PRO AI Telegram Photo Editor Bot (STABLE FINAL VERSION)
-# FIXED FOR RENDER + REAL AI (Replicate)
-# =============================
-
+import logging
 import os
-import time
-import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters
+import cv2
+import numpy as np
+from PIL import Image, ImageEnhance
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
+TOKEN = os.getenv("BOT_TOKEN")
+
+logging.basicConfig(level=logging.INFO)
+
+user_state = {}
+
+# MENU
+menu = ReplyKeyboardMarkup(
+    [["Send photo 📸"]],
+    resize_keyboard=True
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
-
-# =============================
-# UPLOAD IMAGE TO PUBLIC URL
-# =============================
-
-def upload_image(file_path):
-    with open(file_path, "rb") as f:
-        response = requests.post("https://0x0.st", files={"file": f})
-    return response.text.strip()
-
-# =============================
-# REAL AI (Replicate)
-# GFPGAN / Real-ESRGAN STYLE
-# =============================
-
-REPLICATE_URL = "https://api.replicate.com/v1/predictions"
-
-headers = {
-    "Authorization": f"Token {REPLICATE_API_TOKEN}",
-    "Content-Type": "application/json"
-}
-
-async def run_ai_model(image_path):
-    try:
-        image_url = upload_image(image_path)
-
-        headers = {
-            "Authorization": f"Token {REPLICATE_API_TOKEN}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "version": "tencentarc/gfpgan",
-            "input": {
-                "img": image_url,
-                "version": "1.4",
-                "scale": 2
-            }
-        }
-
-        r = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            json=payload,
-            headers=headers
-        )
-
-        if r.status_code != 201:
-            print("AI ERROR:", r.text)
-            return image_path
-
-        prediction = r.json()
-        get_url = prediction["urls"]["get"]
-
-        for _ in range(30):
-            res = requests.get(get_url, headers=headers).json()
-
-            if res["status"] == "succeeded":
-                output = res["output"]
-                if isinstance(output, list):
-                    output = output[0]
-
-                img = requests.get(output).content
-
-                out_path = image_path.replace("input", "output")
-                with open(out_path, "wb") as f:
-                    f.write(img)
-
-                return out_path
-
-            if res["status"] == "failed":
-                print("AI failed")
-                return image_path
-
-            time.sleep(2)
-
-        return image_path
-
-    except Exception as e:
-        print("AI ERROR:", e)
-        return image_path
-        
-# =============================
-# TELEGRAM BOT UI
-# =============================
-
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✨ AI Beauty Enhance", callback_data="ai")],
-        [InlineKeyboardButton("⚡ Enhance Quality", callback_data="ai")],
-        [InlineKeyboardButton("🎭 Style AI", callback_data="ai")]
-    ])
-
-# =============================
-# BOT HANDLERS
-# =============================
-
+# START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me a photo 📸 / ផ្ញើរូបភាព")
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-
-    path = f"input_{update.message.chat_id}.jpg"
-    await file.download_to_drive(path)
-
-    context.user_data["photo"] = path
-
     await update.message.reply_text(
-        "Choose AI enhancement:",
-        reply_markup=menu()
+        "Welcome to BeautyAgent ✨\nSend photo to enhance",
+        reply_markup=menu
     )
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# SIMPLE AI ENHANCEMENT (REAL PROCESSING)
+def enhance_image(input_path, output_path):
+    img = cv2.imread(input_path)
 
-    photo_path = context.user_data.get("photo")
+    # upscale
+    img = cv2.resize(img, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
 
-    if not photo_path:
-        await query.message.reply_text("Please send photo first 📸")
-        return
+    # denoise
+    img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
 
-    await query.message.reply_text("Processing AI... ⏳")
+    # convert to PIL for color boost
+    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
-    output = await run_ai_model(photo_path)
+    enhancer = ImageEnhance.Sharpness(pil_img)
+    pil_img = enhancer.enhance(2.0)
 
-    await query.message.reply_photo(photo=open(output, "rb"))
+    enhancer = ImageEnhance.Contrast(pil_img)
+    pil_img = enhancer.enhance(1.3)
 
-# =============================
+    pil_img.save(output_path)
+
+# PHOTO HANDLER
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Processing AI image... ⏳")
+
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+
+    input_path = "input.jpg"
+    output_path = "output.jpg"
+
+    await file.download_to_drive(input_path)
+
+    try:
+        enhance_image(input_path, output_path)
+
+        await update.message.reply_photo(
+            photo=open(output_path, "rb"),
+            caption="✨ AI Enhanced Image"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
+
+# TEXT HANDLER
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Please send a photo 📸")
+
 # MAIN
-# =============================
-
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(MessageHandler(filters.TEXT, text_handler))
 
-    print("🔥 AI Bot Running...")
-    app.run_polling()
+    print("Bot running...")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
-
-# =============================
-# REQUIREMENTS.txt
-# =============================
-# python-telegram-bot==20.7
-# requests
-
-# =============================
-# ENV VARIABLES (RENDER)
-# =============================
-# BOT_TOKEN=your_token
-# REPLICATE_API_TOKEN=your_replicate_key
