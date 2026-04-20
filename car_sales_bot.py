@@ -187,10 +187,19 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 def main() -> None:
     """Start the bot."""
     init_db()
+    
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN environment variable is not set!")
+        return
+
+    logger.info(f"Starting bot with Admin ID: {ADMIN_USER_ID}")
+    
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CallbackQueryHandler(button_callback))
+    
+    logger.info("Bot is polling for updates...")
     application.run_polling()
 
 if __name__ == "__main__":
