@@ -114,7 +114,7 @@ def build_callback_brand_keyboard():
 
 
 def build_url_brand_keyboard():
-    """Build brand buttons that open the Telegram groups directly."""
+    """Build brand buttons that open the Telegram groups directly, plus contact buttons."""
     keyboard = [
         [
             InlineKeyboardButton(brand, url=BRAND_GROUPS[brand])
@@ -122,6 +122,11 @@ def build_url_brand_keyboard():
         ]
         for i in range(0, len(BRAND_GROUPS), 2)
     ]
+    # Add contact buttons at the bottom
+    keyboard.append([
+        InlineKeyboardButton("🔵 Facebook Page", url=CONTACT_FACEBOOK_URL),
+        InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL),
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 
