@@ -134,8 +134,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # Log the click for analytics
     log_click(user.id, user.username, brand)
+    logger.info(f"User {user.id} ({user.username}) clicked brand: {brand}")
 
     group_link = BRAND_GROUPS.get(brand)
+    logger.info(f"Retrieved group link for {brand}: {group_link}")
+
     if not group_link:
         await query.answer("Sorry, that brand is not currently available.", show_alert=True)
         return
