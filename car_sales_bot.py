@@ -121,7 +121,7 @@ def build_url_brand_keyboard():
     for i in range(0, len(brand_names), 2):
         row = []
         for brand in brand_names[i : i + 2]:
-            row.append(InlineKeyboardButton(f"🚗 {brand} Group", url=BRAND_GROUPS[brand]))
+            row.append(InlineKeyboardButton(f"🔥 {brand}", url=BRAND_GROUPS[brand]))
         keyboard.append(row)
     
     # Add contact buttons at the bottom
