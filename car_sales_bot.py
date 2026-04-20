@@ -124,6 +124,18 @@ def build_url_brand_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
+def build_contact_keyboard():
+    """Build 'Call' and 'Telegram' buttons for car posts."""
+    keyboard = [
+        [
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=f"tel:{CONTACT_NUMBERS[0].replace(' ', '')}"),
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=f"tel:{CONTACT_NUMBERS[1].replace(' ', '')}"),
+        ],
+        [InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL)],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # --- Bot Commands and Handlers ---
 async def post_init(application: Application) -> None:
     """Cleanup any existing webhooks before starting polling."""
@@ -166,7 +178,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # Prepare the response message
     keyboard = [
-        [InlineKeyboardButton(f"👁️ View {brand} Cars", url=group_link)],
+        [InlineKeyboardButton(f"👁 View {brand} Cars", url=group_link)],
         [
             InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=f"tel:{CONTACT_NUMBERS[0].replace(' ', '')}"),
             InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=f"tel:{CONTACT_NUMBERS[1].replace(' ', '')}"),
@@ -180,9 +192,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"Great choice! You've selected {brand}. Click the button below to join the dedicated group and see our current stock."
     )
 
-    if chat_type == 'channel':
-        # When clicked in a channel, send a private message to the user
+    if chat_type in ['channel', 'supergroup', 'group']:
+        # When clicked in a channel or group, send a private message to the user
         try:
+            # Use send_message for text or send_photo if you want to include an image
             await context.bot.send_message(
                 chat_id=user.id,
                 text=caption,
@@ -191,6 +204,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer("I've sent the details to your private messages! សូមពិនិត្យមើលសារឯកជនរបស់អ្នក។", show_alert=True)
         except Exception as e:
             # If the user hasn't started the bot, we can't send a private message
+            logger.warning(f"Could not send private message to {user.id}: {e}")
             await query.answer(
                 "Please start the bot first! សូមចុច 'Start' លើប៊ូតុងខាងក្រោម ដើម្បីទទួលបានព័ត៌មាន។", 
                 show_alert=True,
@@ -266,7 +280,9 @@ async def process_admin_message(update: Update, context: ContextTypes.DEFAULT_TY
 
     target_channel = context.user_data.get('target_channel')
     caption = update.message.caption if update.message.caption else ""
-    reply_markup = build_url_brand_keyboard()
+    
+    # Use contact buttons for individual car posts in brand groups
+    reply_markup = build_contact_keyboard()
 
     try:
         if update.message.photo:
