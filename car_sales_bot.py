@@ -115,13 +115,15 @@ def build_callback_brand_keyboard():
 
 def build_url_brand_keyboard():
     """Build brand buttons that open the Telegram groups directly, plus contact buttons."""
-    keyboard = [
-        [
-            InlineKeyboardButton(brand, url=BRAND_GROUPS[brand])
-            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
-        ]
-        for i in range(0, len(BRAND_GROUPS), 2)
-    ]
+    keyboard = []
+    # Create brand buttons row by row (2 buttons per row)
+    brand_names = list(BRAND_GROUPS.keys())
+    for i in range(0, len(brand_names), 2):
+        row = []
+        for brand in brand_names[i : i + 2]:
+            row.append(InlineKeyboardButton(f"🚗 {brand} Group", url=BRAND_GROUPS[brand]))
+        keyboard.append(row)
+    
     # Add contact buttons at the bottom
     keyboard.append([
         InlineKeyboardButton("🔵 Facebook Page", url=CONTACT_FACEBOOK_URL),
@@ -148,7 +150,8 @@ async def post_init(application: Application) -> None:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a message with inline buttons for car brands."""
-    reply_markup = build_callback_brand_keyboard()
+    # Use direct URL buttons even in /start to ensure no extra steps
+    reply_markup = build_url_brand_keyboard()
     
     caption = (
         "សូមស្វាគមន៍មកកាន់ឆានែលលក់ឡានរបស់យើង! សូមជ្រើសរើសម៉ាកឡានដែលអ្នកចង់មើល៖\n\n"
@@ -182,7 +185,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # Prepare the response message
     keyboard = [
-        [InlineKeyboardButton(f"👁 View {brand} Cars", url=group_link)],
+        [InlineKeyboardButton(f"👁️ View {brand} Cars", url=group_link)],
         [
             InlineKeyboardButton("🔵 Facebook Page", url=CONTACT_FACEBOOK_URL),
             InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL),
@@ -284,8 +287,8 @@ async def process_admin_message(update: Update, context: ContextTypes.DEFAULT_TY
     target_channel = context.user_data.get('target_channel')
     caption = update.message.caption if update.message.caption else ""
     
-    # Use contact buttons for individual car posts in brand groups
-    reply_markup = build_contact_keyboard()
+    # Include the Brand Selection Box (BMW, etc.) plus Contact buttons for channel posts
+    reply_markup = build_url_brand_keyboard()
 
     try:
         if update.message.photo:
