@@ -127,10 +127,21 @@ def build_url_brand_keyboard():
 
 def build_contact_keyboard():
     """Build 'Call' and 'Telegram' buttons for car posts."""
+    # Using https://t.me/+855... format for phone numbers as tel: is sometimes rejected by Telegram API
+    def format_phone_url(number):
+        clean_number = number.replace(" ", "")
+        if not clean_number.startswith("+"):
+            # Assuming Cambodia (+855) if no country code, adjust if needed
+            if clean_number.startswith("0"):
+                clean_number = "+855" + clean_number[1:]
+            else:
+                clean_number = "+855" + clean_number
+        return f"https://t.me/{clean_number}"
+
     keyboard = [
         [
-            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=f"tel:{CONTACT_NUMBERS[0].replace(' ', '')}"),
-            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=f"tel:{CONTACT_NUMBERS[1].replace(' ', '')}"),
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=format_phone_url(CONTACT_NUMBERS[0])),
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=format_phone_url(CONTACT_NUMBERS[1])),
         ],
         [InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL)],
     ]
@@ -177,11 +188,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     # Prepare the response message
+    # Re-using the logic for phone URLs
+    def format_phone_url(number):
+        clean_number = number.replace(" ", "")
+        if not clean_number.startswith("+"):
+            if clean_number.startswith("0"):
+                clean_number = "+855" + clean_number[1:]
+            else:
+                clean_number = "+855" + clean_number
+        return f"https://t.me/{clean_number}"
+
     keyboard = [
         [InlineKeyboardButton(f"👁 View {brand} Cars", url=group_link)],
         [
-            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=f"tel:{CONTACT_NUMBERS[0].replace(' ', '')}"),
-            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=f"tel:{CONTACT_NUMBERS[1].replace(' ', '')}"),
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=format_phone_url(CONTACT_NUMBERS[0])),
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=format_phone_url(CONTACT_NUMBERS[1])),
         ],
         [InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL)],
     ]
