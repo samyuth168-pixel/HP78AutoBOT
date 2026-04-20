@@ -128,35 +128,100 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button clicks for brand selection."""
     query = update.callback_query
-    await query.answer()
     brand = query.data
     user = query.from_user
+    chat_type = query.message.chat.type
 
+    # Log the click for analytics
     log_click(user.id, user.username, brand)
 
     group_link = BRAND_GROUPS.get(brand)
-    if group_link:
-        keyboard = [
-            [InlineKeyboardButton(f"👁️ View {brand} Cars", url=group_link)],
-            [
-                InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=f"tel:{CONTACT_NUMBERS[0].replace(' ', '')}"),
-                InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=f"tel:{CONTACT_NUMBERS[1].replace(' ', '')}"),
-            ],
-            [InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL)],
+    if not group_link:
+        await query.answer("Sorry, that brand is not currently available.", show_alert=True)
+        return
+
+    # Prepare the response message
+    keyboard = [
+        [InlineKeyboardButton(f"👁️ View {brand} Cars", url=group_link)],
+        [
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[0]}", url=f"tel:{CONTACT_NUMBERS[0].replace(' ', '')}"),
+            InlineKeyboardButton(f"📞 {CONTACT_NUMBERS[1]}", url=f"tel:{CONTACT_NUMBERS[1].replace(' ', '')}"),
+        ],
+        [InlineKeyboardButton("💬 Telegram Contact", url=CONTACT_TELEGRAM_URL)],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    caption = (
+        f"ជម្រើសដ៏ល្អ! អ្នកបានជ្រើសរើស {brand}។ សូមចុចប៊ូតុងខាងក្រោមដើម្បីចូលរួមក្រុម និងមើលស្តុកឡានបច្ចុប្បន្ន។\n\n"
+        f"Great choice! You've selected {brand}. Click the button below to join the dedicated group and see our current stock."
+    )
+
+    if chat_type == 'channel':
+        # When clicked in a channel, send a private message to the user
+        try:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=caption,
+                reply_markup=reply_markup
+            )
+            await query.answer("I've sent the details to your private messages! សូមពិនិត្យមើលសារឯកជនរបស់អ្នក។", show_alert=True)
+        except Exception as e:
+            # If the user hasn't started the bot, we can't send a private message
+            await query.answer(
+                "Please start the bot first! សូមចុច 'Start' លើប៊ូតុងខាងក្រោម ដើម្បីទទួលបានព័ត៌មាន។", 
+                show_alert=True,
+                url=f"https://t.me/{context.bot.username}?start=start"
+            )
+    else:
+        # If clicked in a private chat or group, edit the existing message
+        await query.answer()
+        try:
+            await query.edit_message_caption(
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+        except:
+            # Fallback if the message doesn't have a caption (is a text message)
+            await query.edit_message_text(
+                text=caption,
+                reply_markup=reply_markup,
+            )
+
+async def post_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to post the interactive brand selection to a channel."""
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Please provide the channel username. Example: /post @yourchannel")
+        return
+
+    channel_id = context.args[0]
+    keyboard = [
+        [
+            InlineKeyboardButton(brand, callback_data=brand)
+            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        caption = (
-            f"ជម្រើសដ៏ល្អ! អ្នកបានជ្រើសរើស {brand}។ សូមចុចប៊ូតុងខាងក្រោមដើម្បីចូលរួមក្រុម និងមើលស្តុកឡានបច្ចុប្បន្ន។\n\n"
-            f"Great choice! You've selected {brand}. Click the button below to join the dedicated group and see our current stock."
-        )
-        
-        await query.edit_message_caption(
+        for i in range(0, len(BRAND_GROUPS), 2)
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    caption = (
+        "សូមស្វាគមន៍មកកាន់ឆានែលលក់ឡានរបស់យើង! សូមជ្រើសរើសម៉ាកឡានដែលអ្នកចង់មើល៖\n\n"
+        "Welcome to our car sales channel! Please select a brand to view our latest listings:"
+    )
+    
+    try:
+        await context.bot.send_photo(
+            chat_id=channel_id,
+            photo="https://images.unsplash.com/photo-1494976388531-d1058494cdd8?q=80&w=2070&auto=format&fit=crop",
             caption=caption,
             reply_markup=reply_markup,
         )
-    else:
-        await query.edit_message_caption(caption="Sorry, that brand is not currently available.")
+        await update.message.reply_text(f"Successfully posted to {channel_id}!")
+    except Exception as e:
+        await update.message.reply_text(f"Failed to post: {str(e)}\nMake sure the bot is an Admin in the channel.")
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generates a report for the admin."""
@@ -196,6 +261,7 @@ def main() -> None:
     
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("post", post_to_channel))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     
