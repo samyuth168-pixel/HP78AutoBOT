@@ -101,6 +101,29 @@ def generate_report_csv():
     buf.seek(0)
     return buf
 
+def build_callback_brand_keyboard():
+    """Build brand buttons for private chats where callback handling is supported."""
+    keyboard = [
+        [
+            InlineKeyboardButton(brand, callback_data=brand)
+            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
+        ]
+        for i in range(0, len(BRAND_GROUPS), 2)
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_url_brand_keyboard():
+    """Build brand buttons that open the Telegram groups directly."""
+    keyboard = [
+        [
+            InlineKeyboardButton(brand, url=BRAND_GROUPS[brand])
+            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
+        ]
+        for i in range(0, len(BRAND_GROUPS), 2)
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # --- Bot Commands and Handlers ---
 async def post_init(application: Application) -> None:
     """Cleanup any existing webhooks before starting polling."""
@@ -109,14 +132,7 @@ async def post_init(application: Application) -> None:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a message with inline buttons for car brands."""
-    keyboard = [
-        [
-            InlineKeyboardButton(brand, callback_data=brand)
-            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
-        ]
-        for i in range(0, len(BRAND_GROUPS), 2)
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = build_callback_brand_keyboard()
     
     caption = (
         "សូមស្វាគមន៍មកកាន់ឆានែលលក់ឡានរបស់យើង! សូមជ្រើសរើសម៉ាកឡានដែលអ្នកចង់មើល៖\n\n"
@@ -206,14 +222,7 @@ async def post_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     channel_id = context.args[0]
-    keyboard = [
-        [
-            InlineKeyboardButton(brand, callback_data=brand)
-            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
-        ]
-        for i in range(0, len(BRAND_GROUPS), 2)
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = build_url_brand_keyboard()
     
     caption = (
         "សូមស្វាគមន៍មកកាន់ឆានែលលក់ឡានរបស់យើង! សូមជ្រើសរើសម៉ាកឡានដែលអ្នកចង់មើល៖\n\n"
@@ -246,42 +255,42 @@ async def handle_new_post(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data['waiting_for_post'] = True
     
     await update.message.reply_text(
-        f"Okay! Now please **send me the photo** you want to post to {context.args[0]}. "
-        "Make sure to include your **caption** with the photo!"
+        f"Okay! Now please **send me the photo or video** you want to post to {context.args[0]}. "
+        "Make sure to include your **caption** with the media!"
     )
 
 async def process_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Processes the photo and caption sent by the admin for a new post."""
+    """Processes the photo/video and caption sent by the admin for a new post."""
     if update.effective_user.id != ADMIN_USER_ID or not context.user_data.get('waiting_for_post'):
         return
 
     target_channel = context.user_data.get('target_channel')
-    
-    if not update.message.photo:
-        await update.message.reply_text("Please send a **photo** with a caption.")
-        return
-
-    # Get the photo and caption
-    photo_file_id = update.message.photo[-1].file_id
     caption = update.message.caption if update.message.caption else ""
-
-    # Add the brand selection buttons
-    keyboard = [
-        [
-            InlineKeyboardButton(brand, callback_data=brand)
-            for brand in list(BRAND_GROUPS.keys())[i : i + 2]
-        ]
-        for i in range(0, len(BRAND_GROUPS), 2)
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = build_url_brand_keyboard()
 
     try:
-        await context.bot.send_photo(
-            chat_id=target_channel,
-            photo=photo_file_id,
-            caption=caption,
-            reply_markup=reply_markup,
-        )
+        if update.message.photo:
+            # Handle Photo
+            photo_file_id = update.message.photo[-1].file_id
+            await context.bot.send_photo(
+                chat_id=target_channel,
+                photo=photo_file_id,
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+        elif update.message.video:
+            # Handle Video
+            video_file_id = update.message.video.file_id
+            await context.bot.send_video(
+                chat_id=target_channel,
+                video=video_file_id,
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+        else:
+            await update.message.reply_text("Please send a **photo or video** with a caption.")
+            return
+
         await update.message.reply_text(f"✅ Successfully posted to {target_channel}!")
         # Clear the state
         context.user_data['waiting_for_post'] = False
@@ -330,9 +339,9 @@ def main() -> None:
     application.add_handler(CommandHandler("newpost", handle_new_post))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CallbackQueryHandler(button_callback))
-    # Handle photos sent by the admin for /newpost
+    # Handle photos and videos sent by the admin for /newpost
     from telegram.ext import MessageHandler, filters
-    application.add_handler(MessageHandler(filters.PHOTO, process_admin_message))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, process_admin_message))
     
     logger.info("Bot is polling for updates...")
     # Use drop_pending_updates=True to prevent conflict on restart
